@@ -4,6 +4,13 @@
 #include "syscall_ids.h"
 #include "timer.h"
 #include "trap.h"
+#include "vm.h"
+
+uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd);
+uint64 sys_munmap(uint64 start, uint64 len);
+
+#define MAX_SYSCALL_NUM 500
+
 
 uint64 sys_write(int fd, uint64 va, uint len)
 {
@@ -34,9 +41,34 @@ uint64 sys_sched_yield()
 
 uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofday in pagetable. (VA to PA)
 {
+	// Check if the user pointer is valid
+    if (!val) {
+		return -1;
+	}
+        
+    
+    struct proc *p = curr_proc();
+    
+    // Use useraddr to get the physical address of the user-space TimeVal structure
+    uint64 pa = useraddr(p->pagetable, (uint64)val);
+    if (pa == 0) {
+		return -1;
+	}
+        
+    TimeVal *kernel_val = (TimeVal *)pa;
+    // Calculate time values
+    uint64 cycle = get_cycle();
+    uint64 sec = cycle / CPU_FREQ;
+    uint64 usec = (cycle % CPU_FREQ) * 1000000 / CPU_FREQ;
+    
+    // Copy the values to user space using the physical address
+    
+    kernel_val->sec = sec;
+    kernel_val->usec = usec;
+
 	// YOUR CODE
-	val->sec = 0;
-	val->usec = 0;
+	// val->sec = 0;
+	// val->usec = 0;
 
 	/* The code in `ch3` will leads to memory bugs*/
 
@@ -53,6 +85,42 @@ uint64 sys_gettimeofday(TimeVal *val, int _tz) // TODO: implement sys_gettimeofd
 * LAB1: you may need to define sys_task_info here
 */
 
+int sys_task_info(TaskInfo *ti)
+{
+	struct proc *p = curr_proc();
+    
+    // Check if the user pointer is valid
+    if (!p || !ti) 
+        return -1;
+    
+    // Use useraddr to get the physical address of the user-space TaskInfo structure
+    uint64 pa = useraddr(p->pagetable, (uint64)ti);
+    if (pa == 0)
+        return -1;
+    
+    // Create a kernel-side buffer to hold the data
+    TaskInfo kernel_ti;
+    
+    // Fill in the kernel-side TaskInfo structure
+    kernel_ti.status = Running;
+    
+    // Copy syscall times
+    for (int i = 0; i < MAX_SYSCALL_NUM; i++) {
+        kernel_ti.syscall_times[i] = p->syscall_times[i];
+    }
+    
+    // Calculate elapsed time
+    uint64 current_time = get_cycle();
+    uint64 elapsed_cycles = current_time - p->start_time;
+    kernel_ti.time = elapsed_cycles * 1000 / CPU_FREQ;
+    
+    // Copy the entire structure to user space
+    memmove((void *)pa, &kernel_ti, sizeof(TaskInfo));
+    
+    return 0;
+
+}
+
 extern char trap_page[];
 
 void syscall()
@@ -66,6 +134,11 @@ void syscall()
 	/*
 	* LAB1: you may need to update syscall counter for task info here
 	*/
+
+	if (id>=0 && id < MAX_SYSCALL_NUM) {
+		curr_proc()->syscall_times[id]++;
+	}
+
 	switch (id) {
 	case SYS_write:
 		ret = sys_write(args[0], args[1], args[2]);
@@ -82,10 +155,92 @@ void syscall()
 	/*
 	* LAB1: you may need to add SYS_taskinfo case here
 	*/
+	case SYS_task_info:
+			ret = sys_task_info((TaskInfo *)args[0]);
+			break;
+	case SYS_getpid:
+		ret=curr_proc()->pid;
+		break;
+	case SYS_mmap:  // 222
+        ret = sys_mmap(args[0], args[1], args[2], args[3], args[4]);
+        break;
+    case SYS_munmap:  // 215
+        ret = sys_munmap(args[0], args[1]);
+        break;
+
 	default:
 		ret = -1;
 		errorf("unknown syscall %d", id);
 	}
 	trapframe->a0 = ret;
 	tracef("syscall ret %d", ret);
+}
+
+
+uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd) {
+    // 1. Basic validation
+    if (len == 0) return 0; // Return directly if length is 0 
+    if (len > 1024 * 1024 * 1024) return -1; // Upper limit 1GiB 
+    
+    // port bit 0:R, 1:W, 2:X. Other bits must be 0 
+    // Also, unreadable/non-writable/non-executable memory is meaningless
+    if ((port & ~0x7) != 0 || (port & 0x7) == 0) return -1;
+    
+    // Address must be page aligned for mappages
+    if (start % PGSIZE != 0) return -1;
+
+    struct proc *p = curr_proc();
+    uint64 end = PGROUNDUP(start + len);
+
+    // 2. Check if the virtual range is already mapped 
+    for (uint64 va = start; va < end; va += PGSIZE) {
+        if (walkaddr(p->pagetable, va) != 0) {
+            return -1; // A page already mapped exists
+        }
+    }
+
+    // 3. Define PTE flags
+    int pte_flags = PTE_U; // Always set User bit
+    if (port & 1) pte_flags |= PTE_R;
+    if (port & 2) pte_flags |= PTE_W;
+    if (port & 4) pte_flags |= PTE_X;
+
+    // 4. Allocate physical memory and map 
+    for (uint64 va = start; va < end; va += PGSIZE) {
+        char *mem = kalloc();
+        if (mem == 0) {
+            // Insufficient physical memory 
+            // Roll back previous mappings in this loop
+            uvmunmap(p->pagetable, start, (va - start) / PGSIZE, 1);
+            return -1;
+        }
+        memset(mem, 0, PGSIZE); // Zero out anonymous memory
+        if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, pte_flags) != 0) {
+            kfree(mem);
+            uvmunmap(p->pagetable, start, (va - start) / PGSIZE, 1);
+            return -1;
+        }
+    }
+
+    return 0; // Success [cite: 108]
+}
+
+uint64 sys_munmap(uint64 start, uint64 len) {
+    if (len == 0) return 0;
+    if (start % PGSIZE != 0) return -1;
+
+    struct proc *p = curr_proc();
+    uint64 end = PGROUNDUP(start + len);
+
+    // 1. Check if the range is fully mapped 
+    for (uint64 va = start; va < end; va += PGSIZE) {
+        if (walkaddr(p->pagetable, va) == 0) {
+            return -1; // Unmapped virtual memory exists in range
+        }
+    }
+
+    // 2. Perform unmapping and free physical pages
+    uvmunmap(p->pagetable, start, (end - start) / PGSIZE, 1);
+    
+    return 0; // Success 
 }

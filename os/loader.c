@@ -70,6 +70,10 @@ int run_all_app()
 		/*
 		* LAB1: you may need to initialize your new fields of proc here
 		*/
+		p->start_time = 0;
+		for(int i=0; i<500; i++){
+			 p->syscall_times[i]=0;
+		}
 	}
 	return 0;
 }
