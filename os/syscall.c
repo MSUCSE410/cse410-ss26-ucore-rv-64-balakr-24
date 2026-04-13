@@ -176,9 +176,9 @@ void syscall()
 	tracef("syscall ret %d", ret);
 }
 
-
+// request an anonymous physical memory of length len bytes and map it to the virtual memory starting at addr, with a memory page attribute of port
 uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd) {
-    // 1. Basic validation
+    // Validate len limits
     if (len == 0) return 0; // Return directly if length is 0 
     if (len > 1024 * 1024 * 1024) return -1; // Upper limit 1GiB 
     
@@ -192,20 +192,20 @@ uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd) {
     struct proc *p = curr_proc();
     uint64 end = PGROUNDUP(start + len);
 
-    // 2. Check if the virtual range is already mapped 
+    // Collision Detection- Check if the virtual range is already mapped 
     for (uint64 va = start; va < end; va += PGSIZE) {
         if (walkaddr(p->pagetable, va) != 0) {
             return -1; // A page already mapped exists
         }
     }
 
-    // 3. Define PTE flags
-    int pte_flags = PTE_U; // Always set User bit
+    // Define PTE flags
+    int pte_flags = PTE_U; // Always set User bit, or else mem only accessible by kernel
     if (port & 1) pte_flags |= PTE_R;
     if (port & 2) pte_flags |= PTE_W;
     if (port & 4) pte_flags |= PTE_X;
 
-    // 4. Allocate physical memory and map 
+    // Allocate physical memory and map 
     for (uint64 va = start; va < end; va += PGSIZE) {
         char *mem = kalloc();
         if (mem == 0) {
@@ -222,24 +222,27 @@ uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd) {
         }
     }
 
-    return 0; // Success [cite: 108]
+    return 0; // Success
 }
 
+// unmap a block of virtual memory
 uint64 sys_munmap(uint64 start, uint64 len) {
     if (len == 0) return 0;
     if (start % PGSIZE != 0) return -1;
 
     struct proc *p = curr_proc();
+    // round up to the end of the page
     uint64 end = PGROUNDUP(start + len);
 
-    // 1. Check if the range is fully mapped 
+    // Check if the range is fully mapped 
     for (uint64 va = start; va < end; va += PGSIZE) {
         if (walkaddr(p->pagetable, va) == 0) {
             return -1; // Unmapped virtual memory exists in range
         }
     }
 
-    // 2. Perform unmapping and free physical pages
+    // Perform unmapping and free physical pages
+    // removes the entry from the page table and calls kfree to give the physical RAM back to the kernel
     uvmunmap(p->pagetable, start, (end - start) / PGSIZE, 1);
     
     return 0; // Success 
