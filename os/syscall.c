@@ -6,6 +6,11 @@
 #include "timer.h"
 #include "trap.h"
 
+#define BIG_STRIDE 1000000
+
+uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd);
+uint64 sys_munmap(uint64 start, uint64 len);
+
 uint64 sys_write(int fd, uint64 va, uint len)
 {
 	debugf("sys_write fd = %d str = %x, len = %d", fd, va, len);
@@ -95,12 +100,42 @@ uint64 sys_wait(int pid, uint64 va)
 uint64 sys_spawn(uint64 va)
 {
 	// TODO: your job is to complete the sys call
-	return -1;
+	struct proc *p = curr_proc();
+    char name[200];
+    if (copyinstr(p->pagetable, name, va, 200) < 0)
+        return -1;
+
+    int id = get_id_by_name(name);
+    if (id < 0) return -1; // Program not found
+
+    struct proc *np = allocproc();
+    if (np == 0) return -1; // Out of processes
+
+    // Load the new program directly into the new process
+    loader(id, np); 
+
+    np->parent = p;
+    np->state = RUNNABLE;
+    add_task(np);
+
+    return (uint64)np->pid; // Parent returns child PID
 }
 
 uint64 sys_set_priority(long long prio){
-    // TODO: your job is to complete the sys call
-    return -1;
+	// TODO: your job is to complete the sys call
+	struct proc *p = curr_proc();
+
+    if (prio < 2)
+        return -1;
+
+    p->priority = (uint64)prio;
+    p->pass = BIG_STRIDE / p->priority;
+    
+    // According to Stride Scheduling, we usually don't reset 
+    // stride to 0 here to prevent priority-change exploits, 
+    // but the PDF requirement for "initial" stride is 0.
+    
+    return (uint64)prio; // Return the new priority on success
 }
 
 
@@ -148,10 +183,87 @@ void syscall()
 	case SYS_spawn:
 		ret = sys_spawn(args[0]);
 		break;
+	case SYS_mmap:  // 222
+        ret = sys_mmap(args[0], args[1], args[2], args[3], args[4]);
+        break;
+    case SYS_munmap:  // 215
+        ret = sys_munmap(args[0], args[1]);
+        break;
+	case SYS_setpriority: // 140
+		ret = sys_set_priority(args[0]);
+		break;
 	default:
 		ret = -1;
 		errorf("unknown syscall %d", id);
 	}
 	trapframe->a0 = ret;
 	tracef("syscall ret %d", ret);
+}
+
+uint64 sys_mmap(uint64 start, uint64 len, int port, int flag, int fd) {
+    // 1. Basic validation
+    if (len == 0) return 0; // Return directly if length is 0 
+    if (len > 1024 * 1024 * 1024) return -1; // Upper limit 1GiB 
+    
+    // port bit 0:R, 1:W, 2:X. Other bits must be 0 
+    // Also, unreadable/non-writable/non-executable memory is meaningless
+    if ((port & ~0x7) != 0 || (port & 0x7) == 0) return -1;
+    
+    // Address must be page aligned for mappages
+    if (start % PGSIZE != 0) return -1;
+
+    struct proc *p = curr_proc();
+    uint64 end = PGROUNDUP(start + len);
+
+    // 2. Check if the virtual range is already mapped 
+    for (uint64 va = start; va < end; va += PGSIZE) {
+        if (walkaddr(p->pagetable, va) != 0) {
+            return -1; // A page already mapped exists
+        }
+    }
+
+    // 3. Define PTE flags
+    int pte_flags = PTE_U; // Always set User bit
+    if (port & 1) pte_flags |= PTE_R;
+    if (port & 2) pte_flags |= PTE_W;
+    if (port & 4) pte_flags |= PTE_X;
+
+    // 4. Allocate physical memory and map 
+    for (uint64 va = start; va < end; va += PGSIZE) {
+        char *mem = kalloc();
+        if (mem == 0) {
+            // Insufficient physical memory 
+            // Roll back previous mappings in this loop
+            uvmunmap(p->pagetable, start, (va - start) / PGSIZE, 1);
+            return -1;
+        }
+        memset(mem, 0, PGSIZE); // Zero out anonymous memory
+        if (mappages(p->pagetable, va, PGSIZE, (uint64)mem, pte_flags) != 0) {
+            kfree(mem);
+            uvmunmap(p->pagetable, start, (va - start) / PGSIZE, 1);
+            return -1;
+        }
+    }
+
+    return 0; // Success [cite: 108]
+}
+
+uint64 sys_munmap(uint64 start, uint64 len) {
+    if (len == 0) return 0;
+    if (start % PGSIZE != 0) return -1;
+
+    struct proc *p = curr_proc();
+    uint64 end = PGROUNDUP(start + len);
+
+    // 1. Check if the range is fully mapped 
+    for (uint64 va = start; va < end; va += PGSIZE) {
+        if (walkaddr(p->pagetable, va) == 0) {
+            return -1; // Unmapped virtual memory exists in range
+        }
+    }
+
+    // 2. Perform unmapping and free physical pages
+    uvmunmap(p->pagetable, start, (end - start) / PGSIZE, 1);
+    
+    return 0; // Success 
 }

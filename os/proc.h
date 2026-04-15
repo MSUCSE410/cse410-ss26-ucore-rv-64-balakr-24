@@ -45,6 +45,10 @@ struct proc {
 	struct proc *parent; // Parent process
 	uint64 exit_code;
 	struct file *files[FD_BUFFER_SIZE];
+
+	uint64 stride;     // current stride value
+	uint64 pass;       // increment value
+	uint64 priority;   // process priority
 };
 
 int cpuid();
