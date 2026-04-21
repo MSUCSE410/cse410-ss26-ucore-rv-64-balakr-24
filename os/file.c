@@ -154,3 +154,11 @@ uint64 inoderead(struct file *f, uint64 va, uint64 len)
 		f->off += r;
 	return r;
 }
+
+struct file*
+filedup(struct file *f)
+{
+    if(f == 0) return 0;
+    f->ref++;
+    return f;
+}

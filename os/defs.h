@@ -20,4 +20,6 @@
 
 #define NULL ((void *)0)
 
+struct file* filedup(struct file*);
+
 #endif // DEF_H

@@ -45,6 +45,10 @@ struct proc {
 	uint64 exit_code;
 	struct file *files
 		[FD_BUFFER_SIZE]; //File descriptor table, using to record the files opened by the process
+
+	uint64 stride;     // current stride value
+	uint64 pass;       // increment value
+	uint64 priority;   // process priority
 };
 
 int cpuid();

@@ -5,6 +5,10 @@
 #include "vm.h"
 #include "queue.h"
 
+struct file* filealloc(void);
+struct file* filedup(struct file*);
+void         fileclose(struct file*);
+
 struct proc pool[NPROC];
 __attribute__((aligned(16))) char kstack[NPROC][PAGE_SIZE];
 __attribute__((aligned(4096))) char trapframe[NPROC][TRAP_PAGE_SIZE];
@@ -96,6 +100,26 @@ found:
 	memset((void *)p->files, 0, sizeof(struct file *) * FD_BUFFER_SIZE);
 	p->context.ra = (uint64)usertrapret;
 	p->context.sp = p->kstack + KSTACK_SIZE;
+
+	p->priority = 16;
+	p->stride = 0;
+	p->pass = 1000000 / p->priority;
+
+	struct file *f = filealloc();
+    if (f) {
+        f->type = FD_STDIO;
+        f->readable = 1;
+        f->writable = 1;
+        
+        // Assign to the process's file table
+        p->files[0] = filedup(f);
+        p->files[1] = filedup(f);
+        p->files[2] = filedup(f);
+        
+        // Release the initial reference from filealloc
+        fileclose(f);
+    }
+
 	return p;
 }
 
