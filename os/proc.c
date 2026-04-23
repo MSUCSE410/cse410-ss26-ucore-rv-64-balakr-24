@@ -143,6 +143,14 @@ found:
 	p->next_semaphore_id = 0;
 	p->next_condvar_id = 0;
 	// LAB5: (1) you may initialize your new proc variables here
+	p->deadlock_detect_enabled = 0;
+	memset(p->available_m, 0, sizeof(p->available_m));
+	memset(p->allocation_m, 0, sizeof(p->allocation_m));
+	memset(p->request_m, 0, sizeof(p->request_m));
+	memset(p->available_s, 0, sizeof(p->available_s));
+	memset(p->allocation_s, 0, sizeof(p->allocation_s));
+	memset(p->request_s, 0, sizeof(p->request_s));
+
 	return p;
 }
 
@@ -478,4 +486,42 @@ int fdalloc(struct file *f)
 		}
 	}
 	return -1;
+}
+
+int deadlock_detect(const int available[LOCK_POOL_SIZE],
+                    const int allocation[NTHREAD][LOCK_POOL_SIZE],
+                    const int request[NTHREAD][LOCK_POOL_SIZE])
+{
+    int work[LOCK_POOL_SIZE];
+    int finish[NTHREAD] = {0};
+    struct proc *p = curr_proc();
+
+    for (int i = 0; i < LOCK_POOL_SIZE; i++) work[i] = available[i];
+
+    for (int iter = 0; iter < NTHREAD; iter++) {
+        for (int i = 0; i < NTHREAD; i++) {
+            if (finish[i] || p->threads[i].state == T_UNUSED) continue;
+
+            int can_finish = 1;
+            for (int j = 0; j < LOCK_POOL_SIZE; j++) {
+                if (request[i][j] > work[j]) {
+                    can_finish = 0;
+                    break;
+                }
+            }
+
+            if (can_finish) {
+                for (int j = 0; j < LOCK_POOL_SIZE; j++)
+                    work[j] += allocation[i][j];
+                finish[i] = 1;
+            }
+        }
+    }
+
+    for (int i = 0; i < NTHREAD; i++) {
+        if (p->threads[i].state != T_UNUSED && !finish[i]) {
+            return 1; // Deadlock confirmed
+        }
+    }
+    return 0;
 }
