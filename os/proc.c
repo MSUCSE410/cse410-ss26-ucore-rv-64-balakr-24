@@ -488,6 +488,9 @@ int fdalloc(struct file *f)
 	return -1;
 }
 
+
+// deadlock: group of threads are stuck in a permanent wait because every thread in the group is waiting for a resource that is held by another thread in the group.
+// acts as a simulation: check if the system would be deadlocked if it allowed the current request
 int deadlock_detect(const int available[LOCK_POOL_SIZE],
                     const int allocation[NTHREAD][LOCK_POOL_SIZE],
                     const int request[NTHREAD][LOCK_POOL_SIZE])
@@ -496,10 +499,13 @@ int deadlock_detect(const int available[LOCK_POOL_SIZE],
     int finish[NTHREAD] = {0};
     struct proc *p = curr_proc();
 
+	// copies the current available resources into a temporary array called work
     for (int i = 0; i < LOCK_POOL_SIZE; i++) work[i] = available[i];
 
+	// if a thread's request can be satisfied by the work pool, it assumes that thread will finish, release its resources (work += allocation), and marks it finish = true
     for (int iter = 0; iter < NTHREAD; iter++) {
         for (int i = 0; i < NTHREAD; i++) {
+			// uses a finish array to track which threads could theoretically finish
             if (finish[i] || p->threads[i].state == T_UNUSED) continue;
 
             int can_finish = 1;
@@ -518,6 +524,7 @@ int deadlock_detect(const int available[LOCK_POOL_SIZE],
         }
     }
 
+	// If any active thread is NOT marked finish, it means a cycle exists. The function returns 1 (Deadlock detected)
     for (int i = 0; i < NTHREAD; i++) {
         if (p->threads[i].state != T_UNUSED && !finish[i]) {
             return 1; // Deadlock confirmed

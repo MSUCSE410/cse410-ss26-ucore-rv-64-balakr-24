@@ -66,6 +66,12 @@ struct proc {
 	// LAB5: (1) Define your variables for deadlock detect here.
 	//			 You may need a flag to record if detection enabled,
 	//       and some arrays for detection algorithm.
+
+	// allocation_m / allocation_s: Tracks which mutexes/semaphores are currently held by which thread.
+	// request_m / request_s: Tracks which resources a thread is currently waiting for
+	// available_m / available_s: Tracks how many units of a resource (especially for semaphores) are free
+	// deadlock_detect_enabled: A flag to turn the detection logic on or off via system call
+	
 	int deadlock_detect_enabled;                       // Toggle detection
     int available_m[LOCK_POOL_SIZE];                   // Mutex availability
     int allocation_m[NTHREAD][LOCK_POOL_SIZE];          // Mutexes held by threads

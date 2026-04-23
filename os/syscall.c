@@ -253,6 +253,8 @@ int sys_waittid(int tid)
 *				use this idea or just ignore it.
 */
 
+// mutex: manage access to a critical section —a portion of code that accesses a shared resource (like a global variable) that must not be accessed by more than one thread simultaneously.
+// Initializes a new mutex in the kernel.
 int sys_mutex_create(int blocking)
 {
 	struct mutex *m = mutex_create(blocking);
@@ -262,17 +264,20 @@ int sys_mutex_create(int blocking)
 	}
 	// LAB5: (4-1) You may want to maintain some variables for detect here
 	int mutex_id = m - curr_proc()->mutex_pool;
+	// sets the available_m tracker to 1, meaning the "key" is currently available for the first person who asks.
 	curr_proc()->available_m[mutex_id] = 1;
 	debugf("create mutex %d", mutex_id);
 	return mutex_id;
 }
 
+// records that a thread wants the lock (request_m = 1)
 int sys_mutex_lock(int mutex_id) {
     struct proc *p = curr_proc();
     int tid = curr_thread()->tid;
 
     if (mutex_id < 0 || mutex_id >= p->next_mutex_id) return -1;
 
+	// runs deadlock_detect. If the simulation fails, it returns -0xDEAD
     if (p->deadlock_detect_enabled) {
         p->request_m[tid][mutex_id] = 1;
         if (deadlock_detect(p->available_m, p->allocation_m, p->request_m)) {
@@ -281,9 +286,10 @@ int sys_mutex_lock(int mutex_id) {
         }
     }
 
-    // Now call the actual kernel lock
+	// if safe, it calls mutex_lock
     mutex_lock(&p->mutex_pool[mutex_id]);
 
+	// Once the thread wakes up with the lock, it moves the tracker from request to allocation
     // Update state once lock is physically held
     p->request_m[tid][mutex_id] = 0;
     p->allocation_m[tid][mutex_id] = 1;
@@ -292,6 +298,7 @@ int sys_mutex_lock(int mutex_id) {
     return 0; // Explicitly return 0 for success
 }
 
+// Releases the lock so others can use it
 int sys_mutex_unlock(int mutex_id)
 {
     struct proc *p = curr_proc();
@@ -304,15 +311,15 @@ int sys_mutex_unlock(int mutex_id)
 
     mutex_unlock(&p->mutex_pool[mutex_id]);
 
-    // Reset tracking variables
+    // // resets the trackers so the OS knows the resource is available again
     p->allocation_m[tid][mutex_id] = 0;
     p->available_m[mutex_id] = 1;
 
     return 0;
 }
 
-
-
+// semaphore: maintains an internal counter to control access to a pool of shared resources. Unlike a mutex, it does not have a concept of ownership; any thread can increment the counter.
+// Creates a semaphore and sets its available_s to the initial res_count
 int sys_semaphore_create(int res_count)
 {
 	struct semaphore *s = semaphore_create(res_count);
@@ -327,6 +334,8 @@ int sys_semaphore_create(int res_count)
 	return sem_id;
 }
 
+// Releases one unit of the resource back into the pool
+// Increments available_s and clears the thread's allocation record
 int sys_semaphore_up(int semaphore_id)
 {
     struct proc *p = curr_proc();
@@ -347,6 +356,8 @@ int sys_semaphore_up(int semaphore_id)
     return 0;
 }
 
+// checks if taking one resource will cause a deadlock.
+// If safe, it decrements the available_s count and marks the thread as "holding" one unit in allocation_s
 int sys_semaphore_down(int semaphore_id)
 {
     struct proc *p = curr_proc();
