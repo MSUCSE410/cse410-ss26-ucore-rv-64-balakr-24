@@ -92,6 +92,7 @@ found:
 	p->context.ra = (uint64)usertrapret;
 	p->context.sp = p->kstack + KSTACK_SIZE;
 
+	// set the initial priority to 16, stride to 0, and calculates the pass value
 	p->priority = 16;
 	p->stride = 0;
 	p->pass = BIG_STRIDE / p->priority;
@@ -144,8 +145,11 @@ void scheduler()
         tracef("switch to proc %d (stride=%d, pass=%d, prio=%d)",
                best->pid, best->stride, best->pass, best->priority);
 
+		// switches the context from the idle kernel thread to the best process
+		// saves the current CPU registers and loads the registers of the next process
         swtch(&idle.context, &best->context);
 
+		// When a hardware timer interrupts a process, the kernel calls yield()
         // 4. AFTER it yields/returns → update stride
         if (best->state == RUNNABLE) {
             best->stride += best->pass;

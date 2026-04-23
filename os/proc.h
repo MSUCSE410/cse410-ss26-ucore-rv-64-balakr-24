@@ -46,8 +46,8 @@ struct proc {
 	uint64 exit_code;
 	struct file *files[FD_BUFFER_SIZE];
 
-	uint64 stride;     // current stride value
-	uint64 pass;       // increment value
+	uint64 stride;     // dynamic value that tracks the "total distance" a process has traveled while running on the CPU
+	uint64 pass;       // stride length- amount of progress a process makes in a single time slice
 	uint64 priority;   // process priority
 };
 

@@ -97,17 +97,21 @@ uint64 sys_wait(int pid, uint64 va)
 	return wait(pid, code);
 }
 
+// creates a new child process and loads a target program directly into it.
+// Unlike fork, it doesn't need to copy the parent's memory space and replace the current process's memory with a new program
 uint64 sys_spawn(uint64 va)
 {
 	// TODO: your job is to complete the sys call
 	struct proc *p = curr_proc();
     char name[200];
+	// copy name from user space to kernel space
     if (copyinstr(p->pagetable, name, va, 200) < 0)
         return -1;
 
     int id = get_id_by_name(name);
     if (id < 0) return -1; // Program not found
 
+	// reserve a slot in the process pool
     struct proc *np = allocproc();
     if (np == 0) return -1; // Out of processes
 
@@ -115,12 +119,15 @@ uint64 sys_spawn(uint64 va)
     loader(id, np); 
 
     np->parent = p;
+
+	// Sets the state to RUNNABLE and adds it to the task manager.
     np->state = RUNNABLE;
     add_task(np);
 
     return (uint64)np->pid; // Parent returns child PID
 }
 
+// allows a process to change its own priority which directly affects its scheduling "pass" value.
 uint64 sys_set_priority(long long prio){
 	// TODO: your job is to complete the sys call
 	struct proc *p = curr_proc();
@@ -128,12 +135,10 @@ uint64 sys_set_priority(long long prio){
     if (prio < 2)
         return -1;
 
+
+	// higher priority results in a smaller pass, meaning the stride increases more slowly, allowing the process to be selected by the scheduler more frequently.
     p->priority = (uint64)prio;
     p->pass = BIG_STRIDE / p->priority;
-    
-    // According to Stride Scheduling, we usually don't reset 
-    // stride to 0 here to prevent priority-change exploits, 
-    // but the PDF requirement for "initial" stride is 0.
     
     return (uint64)prio; // Return the new priority on success
 }
