@@ -43,6 +43,7 @@ struct superblock {
 
 // LAB4: Keep it the same as dinode in os/fs.h after you change it
 // On-disk inode structure
+// make sure filesystem format is same as kernel so they can be syncronized
 struct dinode {
 	short type;              // File type
     short nlink;             // NEW: Link count (2 bytes)

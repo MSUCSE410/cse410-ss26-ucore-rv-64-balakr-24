@@ -203,9 +203,9 @@ void ivalid(struct inode *ip)
 	}
 }
 
+// manages the lifecycle of an inode
 // Drop a reference to an in-memory inode.
-// If that was the last reference, the inode table entry can
-// be recycled.
+// If that was the last reference, the inode table entry can be recycled.
 // If that was the last reference and the inode has no links
 // to it, free the inode (and its content) on disk.
 // All calls to iput() must be inside a transaction in
@@ -219,6 +219,9 @@ void iput(struct inode *ip)
     }
 
 	// LAB4: Unmark the condition and change link count variable name (nlink) if needed
+	// When ref hits 1 and nlink is 0, the file is truly dead
+	// itrunc iterates through the inode’s address array, for every valid block number it finds, it calls bfree to mark that block as available in the bitmap. empties the file.
+	// check fo ref == 1 because the last call to iput is the last one holding the file
 	if (ip->ref == 1 && ip->valid && ip->nlink == 0) {
 		// inode has no links and no other references: truncate and free.
 		itrunc(ip);
@@ -451,7 +454,7 @@ int dirunlink(struct inode *dp, char *name)
     if (dp->type != T_DIR)
         panic("dirunlink not DIR");
 
-    // Loop through all directory entries
+	// loops through the data blocks of the parent directory (dp), reading one directory entries at a time
     for (off = 0; off < dp->size; off += sizeof(de)) {
         // Read the current entry
         if (readi(dp, 0, (uint64)&de, off, sizeof(de)) != sizeof(de))
@@ -463,7 +466,7 @@ int dirunlink(struct inode *dp, char *name)
 
         // Check if the name matches
         if (strncmp(name, de.name, DIRSIZ) == 0) {
-            // Found it! Clear the entry by zeroing out the struct
+            // Found the name, Clear the entry by zeroing out the struct
             memset(&de, 0, sizeof(de));
             
             // Write the zeroed entry back to the disk
@@ -486,6 +489,7 @@ struct inode *root_dir()
 }
 
 //Find the corresponding inode according to the path
+// Converts a string path (like /user/test) into an inode pointer
 struct inode *namei(char *path)
 {
 	//int skip = 0;

@@ -12,9 +12,19 @@
 struct inode {
 	uint dev; // Device number
 	uint inum; // Inode number
-	int ref; // Reference count
+
+	// Kernel-only counter, Reference count
+	// how many pointers in the system's memory are currently "holding" this inode
+	int ref; 
+	// 0 (Invalid): The kernel has an entry for this inode in memory, but it hasn't actually read the data (like size or block addresses) from the disk yet
+	// 1 (Valid): The kernel has successfully called bread and filled this structure with the real data from the disk
 	int valid; // inode has been read from disk?
+	// types: dir, data file
+	// 0 means empty
+	// tells the kernel which functions are allowed
 	short type; // copy of disk inode
+	// Disk-based counter
+	// tracks how many "names" or "nicknames" this file has in the filesystem
 	short nlink;
 	
 	uint size;

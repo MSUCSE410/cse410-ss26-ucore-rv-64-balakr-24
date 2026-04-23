@@ -240,6 +240,8 @@ uint64 sys_close(int fd)
 	return 0;
 }
 
+// retrieve metadata about an open file
+// verify that nlink increased after linkat
 int sys_fstat(int fd,uint64 stat){
 	//TODO: your job is to complete the syscall
 	struct proc *p = curr_proc();
@@ -255,6 +257,7 @@ int sys_fstat(int fd,uint64 stat){
     // If your project uses f->type, usually FD_INODE = 1 or 2
     if (f->ip == NULL) return -1;
 
+	// populate the Stat struct with the file's metadata from the inode
     Stat st;
     st.dev = 0; // Drive number is always 0 for this lab
     st.ino = f->ip->inum;
@@ -272,12 +275,14 @@ int sys_fstat(int fd,uint64 stat){
     return 0;
 }
 
+// creates a hard link to a file
+// not copying the file; you are creating a new name for the same inode.
 int sys_linkat(int olddirfd, uint64 oldpath, int newdirfd, uint64 newpath, uint64 flags){
 	//TODO: your job is to complete the syscall
 	char name_old[MAXPATH], name_new[MAXPATH];
     struct proc *p = curr_proc();
 
-    // Copy path strings from user space using provided addresses
+    // Copy path strings from user space in to kernel using provided addresses
     if (copyinstr(p->pagetable, name_old, oldpath, MAXPATH) < 0) return -1;
     if (copyinstr(p->pagetable, name_new, newpath, MAXPATH) < 0) return -1;
 
@@ -298,6 +303,7 @@ int sys_linkat(int olddirfd, uint64 oldpath, int newdirfd, uint64 newpath, uint6
     // In this lab, we use the root directory for all links
     struct inode *dp = root_dir(); 
     
+	// Add a new entry in the target directory using dirlink.
     // Create the directory entry for the new name pointing to the old inode
     if (dirlink(dp, name_new, ip->inum) < 0) {
         iput(ip);
@@ -305,15 +311,17 @@ int sys_linkat(int olddirfd, uint64 oldpath, int newdirfd, uint64 newpath, uint6
         return -1;
     }
 
-    // Increment link count and sync to disk
+    // Increment ip->nlink and call iupdate(ip) to save the change to disk
     ip->nlink++; 
     iupdate(ip); 
     
+	// release the directory and inode references using iput to prevent memory leaks
     iput(ip);
     iput(dp);
     return 0;
 }
 
+// Unlink a file path to a file
 int sys_unlinkat(int dirfd, uint64 name, uint64 flags){
 	//TODO: your job is to complete the syscall
 	struct inode *ip, *dp;
@@ -332,6 +340,7 @@ int sys_unlinkat(int dirfd, uint64 name, uint64 flags){
         return -1;
     }
 
+	// find he inode and its offset in the parent directory
     uint off;
     if((ip = dirlookup(dp, name_buf, &off)) == 0){
         iunlockput(dp);
@@ -360,6 +369,7 @@ int sys_unlinkat(int dirfd, uint64 name, uint64 flags){
     iupdate(ip);
     
     // This now safely triggers deletion ONLY for regular files
+	// If that was the last name for the file and no process has it open, the blocks are freed.
     iunlockput(ip); 
 
     return 0;
